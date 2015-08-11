@@ -1,0 +1,14 @@
+[package]
+name = "rustio"
+version = "0.1.0"
+authors = ["Matt Rudder <matt@mattrudder.com>"]
+
+[dependencies]
+glium = "*"
+glutin = "*"
+genmesh = "*"
+clock_ticks = "*"
+obj = "*"
+image = "*"
+xml-rs = "0.1.25"
+rand = "0.3"
