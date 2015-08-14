@@ -17,6 +17,7 @@ use std::fs::File;
 use std::path::Path;
 //use std::fs::PathExt;
 use std::io::Cursor;
+use std::rc::Rc;
 
 // Loops through the attributes once and pulls out the ones we ask it to. It
 // will check that the required ones are there. This could have been done with
@@ -136,12 +137,12 @@ impl TextureAtlasEntry {
 #[derive(Debug)]
 pub struct TextureAtlas {
     pub image_path: String,
-    pub texture: glium::texture::Texture2d,
+    pub texture: Rc<glium::texture::Texture2d>,
     pub entries: Vec<TextureAtlasEntry>
 }
 
 impl TextureAtlas {
-    fn new<R: Read, P: AsRef<Path>>(display: &glium::Display, parser: &mut EventReader<R>, attrs: Vec<OwnedAttribute>, file_path: P) -> SpriteResult<TextureAtlas>  {
+    fn new<R: Read, P: AsRef<Path>>(display: &glium::Display, parser: &mut EventReader<R>, attrs: Vec<OwnedAttribute>, file_path: P) -> SpriteResult<Rc<TextureAtlas>>  {
         let ((), path) = get_attrs!(
           attrs,
           optionals: [],
@@ -179,10 +180,10 @@ impl TextureAtlas {
             glium::texture::Texture2d::new(display, image)
         };
 
-        Ok(TextureAtlas { image_path: path, texture: texture, entries: entries })
+        Ok(Rc::new(TextureAtlas { image_path: path, texture: Rc::new(texture), entries: entries }))
     }
 
-    pub fn from_file<P: AsRef<Path>>(display: &glium::Display, file_path: P) -> Result<TextureAtlas, SpriteError> {
+    pub fn from_file<P: AsRef<Path>>(display: &glium::Display, file_path: P) -> SpriteResult<Rc<TextureAtlas>> {
         let file = try!(File::open(file_path.as_ref()).map_err(SpriteError::FileIo));
         let mut parser = EventReader::new(file);
 
@@ -200,24 +201,24 @@ impl TextureAtlas {
     }
 }
 
-struct Sprite<'ta> {
+struct Sprite {
     position: [f32; 2],
     size: [f32; 2],
     color: [f32; 4],
     tex_rect: [f32; 4],
-    texture: &'ta TextureAtlas
+    texture: Rc<TextureAtlas>
 }
 
-pub struct SpriteBatchInst<'ta> {
-    sprites: Vec<Sprite<'ta>>,
+pub struct SpriteBatchInst {
+    sprites: Vec<Sprite>,
 }
 
-pub struct SpriteBatch<'ta> {
+pub struct SpriteBatch {
     max_count: usize,
     material: glium::Program,
     vertices: glium::VertexBuffer<SpriteVertex>,
     indicies: glium::IndexBuffer<u16>,
-    batches: Vec<SpriteBatchInst<'ta>>,
+    batches: Vec<SpriteBatchInst>,
 }
 
 #[derive(Copy, Clone)]
@@ -232,8 +233,8 @@ implement_vertex!(SpriteVertex, position, color, uv, tex_id);
 
 fn ptr_eq<T>(a: *const T, b: *const T) -> bool { a == b }
 
-impl<'ta> SpriteBatchInst<'ta> {
-    pub fn draw(&mut self, x: f32, y: f32, w: f32, h: f32, texture: &'ta TextureAtlas) {
+impl SpriteBatchInst {
+    pub fn draw(&mut self, x: f32, y: f32, w: f32, h: f32, texture: Rc<TextureAtlas>) {
         // TODO: Add depth sorting, different modes based on details passed into begin.
         // TODO: Don't let sprites vec grow past max_count
         //let color: (f32, f32, f32) = (rand::random(), rand::random(), rand::random());
@@ -250,8 +251,8 @@ impl<'ta> SpriteBatchInst<'ta> {
     }
 }
 
-impl<'ta> SpriteBatch<'ta> {
-    pub fn new(display: &glium::Display, max_batch_size: usize) -> SpriteResult<SpriteBatch<'ta>> {
+impl SpriteBatch {
+    pub fn new(display: &glium::Display, max_batch_size: usize) -> SpriteResult<SpriteBatch> {
         let program = program!(display,
             140 => {
                 vertex: "

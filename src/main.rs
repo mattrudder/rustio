@@ -47,7 +47,7 @@ fn main() {
                 for x in 0..1 {
                     //let pos: (f32, f32) = (rand::random(), rand::random());
                     println!("batching sprite at {},{}", x, y);
-                    b.draw(x as f32, y as f32, 32.0, 32.0, &atlas);
+                    b.draw(x as f32, y as f32, 32.0, 32.0, atlas.clone());
                 }
             }
         });
