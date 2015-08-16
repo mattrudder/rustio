@@ -18,6 +18,7 @@ use std::path::Path;
 //use std::fs::PathExt;
 use std::io::Cursor;
 use std::rc::Rc;
+use std::ops::Index;
 
 // Loops through the attributes once and pulls out the ones we ask it to. It
 // will check that the required ones are there. This could have been done with
@@ -104,11 +105,11 @@ impl fmt::Display for SpriteError {
 
 #[derive(Debug)]
 pub struct TextureAtlasEntry {
-  name: String,
-  x: usize,
-  y: usize,
-  width: usize,
-  height: usize
+  pub name: String,
+  pub x: usize,
+  pub y: usize,
+  pub width: usize,
+  pub height: usize
 }
 
 impl TextureAtlasEntry {
@@ -164,15 +165,18 @@ impl TextureAtlas {
 
         let texture = {
             let image =
-                image::open(&path).unwrap_or_else(|_| {
-                    println!("generating default image.");
+                image::open(&tex_path).unwrap_or_else(|e| {
+                    // TODO: See if we can make this data constant.
+                    println!("unable to open {:?}: {:?}", &tex_path, e);
                     let img = image::ImageBuffer::from_fn(32, 32, |x, y| {
-                        // if x > 16 || y > 16 {
-                        //     image::Rgba([0u8, 0u8, 0u8, 255u8])
-                        // } else {
-                        //     image::Rgba([255u8, 255u8, 255u8, 255u8])
-                        // }
-                        image::Rgba([255u8, 0u8, 0u8, 255u8])
+                        let cx = (x / 16) % 2;
+                        let cy = (y / 16) % 2;
+                        if cx != cy {
+                            image::Rgba([255u8, 0u8, 0u8, 255u8])
+                        } else {
+                            image::Rgba([0u8, 0u8, 255u8, 255u8])
+                        }
+                        //image::Rgba([255u8, 0u8, 0u8, 255u8])
                     });
                     image::DynamicImage::ImageRgba8(img)
                 });
@@ -198,6 +202,10 @@ impl TextureAtlas {
                 _ => {}
             }
         }
+    }
+
+    pub fn get<'a>(&'a self, _index: &str) -> Option<&'a TextureAtlasEntry> {
+        self.entries.iter().find(|&e| e.name == _index)
     }
 }
 
@@ -234,7 +242,7 @@ implement_vertex!(SpriteVertex, position, color, uv, tex_id);
 fn ptr_eq<T>(a: *const T, b: *const T) -> bool { a == b }
 
 impl SpriteBatchInst {
-    pub fn draw(&mut self, x: f32, y: f32, w: f32, h: f32, texture: Rc<TextureAtlas>) {
+    pub fn draw(&mut self, x: f32, y: f32, w: f32, h: f32, u: f32, v: f32, s: f32, t: f32, texture: Rc<TextureAtlas>) {
         // TODO: Add depth sorting, different modes based on details passed into begin.
         // TODO: Don't let sprites vec grow past max_count
         //let color: (f32, f32, f32) = (rand::random(), rand::random(), rand::random());
@@ -245,131 +253,39 @@ impl SpriteBatchInst {
             position: [x, y],
             size: [w, h],
             color: [1.0, 1.0, 1.0, 1.0],
-            tex_rect: [0.0, 0.0, 1.0, 1.0],
+            tex_rect: [u, v, s, t],
+            //tex_rect: [0.0, 0.0, 32.0, 32.0],
             texture: texture
         });
     }
+
+    pub fn draw_entry(&mut self, x: f32, y: f32, w: f32, h: f32, texture: Rc<TextureAtlas>, entry: &TextureAtlasEntry) {
+        // TODO: Add depth sorting, different modes based on details passed into begin.
+        // TODO: Don't let sprites vec grow past max_count
+        //let color: (f32, f32, f32) = (rand::random(), rand::random(), rand::random());
+        // let dimensions = self.frame.get_dimensions();
+        // let vw = dimensions.0 as f32;
+        // let vh = dimensions.1 as f32;
+        self.draw(x, y, w, h, entry.x as f32, entry.y as f32, entry.width as f32, entry.height as f32, texture);
+    }
+
+
 }
 
 impl SpriteBatch {
     pub fn new(display: &glium::Display, max_batch_size: usize) -> SpriteResult<SpriteBatch> {
         let program = program!(display,
             140 => {
-                vertex: "
-                    #version 140
-                    in vec2 position;
-                    in vec2 uv;
-                    in vec4 color;
-                    in uint tex_id;
-                    out vec2 v_tex_coords;
-                    out vec4 v_color;
-                    flat out uint v_tex_id;
-                    void main() {
-                        gl_Position = vec4(position, 0.0, 1.0);
-                        if (gl_VertexID % 4 == 0) {
-                            v_tex_coords = vec2(0.0, 1.0);
-                        } else if (gl_VertexID % 4 == 1) {
-                            v_tex_coords = vec2(1.0, 1.0);
-                        } else if (gl_VertexID % 4 == 2) {
-                            v_tex_coords = vec2(0.0, 0.0);
-                        } else {
-                            v_tex_coords = vec2(1.0, 0.0);
-                        }
-                        v_tex_id = tex_id;
-                        v_color = color;
-                    }
-                ",
-
-                fragment: "
-                    #version 140
-                    uniform sampler2DArray tex;
-                    in vec2 v_tex_coords;
-                    in vec4 v_color;
-                    flat in uint v_tex_id;
-                    out vec4 f_color;
-                    void main() {
-                        //f_color = v_color;
-                        f_color = texture(tex, vec3(v_tex_coords, float(v_tex_id)));
-                    }
-                "
+                vertex: include_str!("../assets/shaders/sprite_batch.140.vsh"),
+                fragment: include_str!("../assets/shaders/sprite_batch.140.fsh"),
             },
-
             110 => {
-                vertex: "
-                    #version 110
-                    in vec2 position;
-                    in vec2 uv;
-                    in vec4 color;
-                    in uint tex_id;
-                    varying vec2 v_tex_coords;
-                    varying vec4 v_color;
-                    flat varying uint v_tex_id;
-                    void main() {
-                        gl_Position = vec4(position, 0.0, 1.0);
-                        if (gl_VertexID % 4 == 0) {
-                            v_tex_coords = vec2(0.0, 1.0);
-                        } else if (gl_VertexID % 4 == 1) {
-                            v_tex_coords = vec2(1.0, 1.0);
-                        } else if (gl_VertexID % 4 == 2) {
-                            v_tex_coords = vec2(0.0, 0.0);
-                        } else {
-                            v_tex_coords = vec2(1.0, 0.0);
-                        }
-                        v_tex_id = i_tex_id;
-                        v_color = color;
-                    }
-                ",
-
-                fragment: "
-                    #version 110
-                    uniform sampler2DArray tex;
-                    varying vec2 v_tex_coords;
-                    varying vec4 v_color;
-                    flat varying uint v_tex_id;
-                    void main() {
-                        gl_FragColor = texture2DArray(tex, vec3(v_tex_coords, float(v_tex_id)));
-                        //gl_FragColor = v_color;
-                    }
-                "
+                vertex: include_str!("../assets/shaders/sprite_batch.110.vsh"),
+                fragment: include_str!("../assets/shaders/sprite_batch.110.fsh"),
             },
-
             100 => {
-                vertex: "
-                    #version 100
-                    attribute lowp vec2 position;
-                    attribute lowp vec2 uv;
-                    attribute lowp vec4 color;
-                    attribute uint tex_id;
-                    varying lowp vec2 v_tex_coords;
-                    varying lowp vec4 v_color;
-                    flat varying uint v_tex_id;
-                    void main() {
-                        gl_Position = vec4(position, 0.0, 1.0);
-                        if (gl_VertexID % 4 == 0) {
-                            v_tex_coords = vec2(0.0, 1.0);
-                        } else if (gl_VertexID % 4 == 1) {
-                            v_tex_coords = vec2(1.0, 1.0);
-                        } else if (gl_VertexID % 4 == 2) {
-                            v_tex_coords = vec2(0.0, 0.0);
-                        } else {
-                            v_tex_coords = vec2(1.0, 0.0);
-                        }
-                        v_tex_id = i_tex_id;
-                        v_color = color;
-                    }
-                ",
-
-                fragment: "
-                    #version 100
-                    uniform sampler2DArray tex;
-                    varying lowp vec2 v_tex_coords;
-                    varying lowp vec4 v_color;
-                    flat varying uint v_tex_id;
-                    void main() {
-                        gl_FragColor = texture2DArray(tex, vec3(v_tex_coords, float(v_tex_id)));
-                        //gl_FragColor = v_color;
-                    }
-                "
+                vertex: include_str!("../assets/shaders/sprite_batch.100.vsh"),
+                fragment: include_str!("../assets/shaders/sprite_batch.100.fsh"),
             },
         ).unwrap();
 
@@ -402,7 +318,7 @@ impl SpriteBatch {
         (vx, vy)
     }
 
-    pub fn begin<F>(&mut self, scope: F) where F: Fn(&mut SpriteBatchInst) {
+    pub fn begin<F>(&mut self, scope: F) where F: FnOnce(&mut SpriteBatchInst) {
         self.batches.clear(); // TODO: Move to separate call.
         let mut batch =
             SpriteBatchInst {
@@ -419,7 +335,13 @@ impl SpriteBatch {
         let (vw, vh) = frame.get_dimensions();
         let vw = vw as f32;
         let vh = vh as f32;
+        let hvw = vw / 2.0;
+        let hvh = vh / 2.0;
         let mut offset = 0;
+
+        // TODO: Sort sprites by active texture.
+        let mut texture = None;
+
         {
             let verts = &mut self.vertices;
             let mut vert_mapped = verts.map();
@@ -430,49 +352,63 @@ impl SpriteBatch {
                 let verts = vert_chunks.skip(offset).take(sprite_count);
                 offset += sprite_count;
 
-                println!("drawing {:?} sprites", sprite_count);
                 for (i, sprite_verts) in verts.enumerate() {
                     let sprite = &batch.sprites[i];
-
-                    let x = sprite.position[0] / vw;
-                    let y = sprite.position[1] / vh;
+                    texture = Some(sprite.texture.clone());
+                    let x = (sprite.position[0] * 2.0 - vw) / vw;
+                    let y = ((sprite.position[1] * 2.0 - vh) / vh) * -1.0;
                     let w = sprite.size[0] / vw;
                     let h = sprite.size[1] / vh;
                     let color = sprite.color;
 
-                    // println!("sprite: {:?}", sprite.position);
+                    let tex = &sprite.texture.texture;
+                    let tw = tex.get_width() as f32;
+                    let th = tex.get_height().unwrap() as f32;
+                    let tl = sprite.tex_rect[0] / tw;
+                    let tt = (th - sprite.tex_rect[1]) / th;
+                    let tr = (sprite.tex_rect[0] + sprite.tex_rect[2]) / tw;
+                    let tb = (th - sprite.tex_rect[1] - sprite.tex_rect[3]) / th;
 
                     sprite_verts[0].position[0] = x - w;
                     sprite_verts[0].position[1] = y + h;
-                    sprite_verts[0].uv[0] = sprite.tex_rect[0];
-                    sprite_verts[0].uv[1] = sprite.tex_rect[3];
+                    sprite_verts[0].uv[0] = tl;
+                    sprite_verts[0].uv[1] = tt;
                     sprite_verts[0].color = color;
 
                     sprite_verts[1].position[0] = x + w;
                     sprite_verts[1].position[1] = y + h;
-                    sprite_verts[1].uv[0] = sprite.tex_rect[2];
-                    sprite_verts[1].uv[1] = sprite.tex_rect[3];
+                    sprite_verts[1].uv[0] = tr;
+                    sprite_verts[1].uv[1] = tt;
                     sprite_verts[1].color = color;
 
                     sprite_verts[2].position[0] = x - w;
                     sprite_verts[2].position[1] = y - h;
-                    sprite_verts[2].uv[0] = sprite.tex_rect[0];
-                    sprite_verts[2].uv[1] = sprite.tex_rect[1];
+                    sprite_verts[2].uv[0] = tl;
+                    sprite_verts[2].uv[1] = tb;
                     sprite_verts[2].color = color;
 
                     sprite_verts[3].position[0] = x + w;
                     sprite_verts[3].position[1] = y - h;
-                    sprite_verts[3].uv[0] = sprite.tex_rect[2];
-                    sprite_verts[3].uv[1] = sprite.tex_rect[1];
+                    sprite_verts[3].uv[0] = tr;
+                    sprite_verts[3].uv[1] = tb;
                     sprite_verts[3].color = color;
+
+                    // for i in 0..4 {
+                    //     println!("sprite_verts[{}].uv: {},{}", i, sprite_verts[i].uv[0], sprite_verts[i].uv[1]);
+                    // }
                 }
             }
         }
 
 
         let ib_slice = self.indicies.slice(0 .. offset * 6).unwrap();
+        let tex = texture.unwrap();
+        let uniforms = uniform! {
+            tex: tex.texture.sampled()//.magnify_filter(glium::uniforms::MagnifySamplerFilter::Linear)
+        };
+
         frame.draw(&self.vertices, &ib_slice,
-                    &self.material, &uniform! {}, &Default::default()).unwrap();
+                    &self.material, &uniforms, &Default::default()).unwrap();
 
     }
 }

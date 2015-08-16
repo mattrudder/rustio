@@ -16,6 +16,8 @@ mod support;
 mod sprites;
 use sprites::{TextureAtlas, SpriteBatch};
 
+use std::cell::RefCell;
+
 const SPRITES_COUNT: usize = 1024;
 
 fn main() {
@@ -30,38 +32,70 @@ fn main() {
 
     // the main loop
     println!("current dir: {:?}", std::env::current_dir());
-    let atlas = TextureAtlas::from_file(&display, &Path::new("assets/textures/p1_spritesheet.xml")).unwrap();
-    println!("atlas: {:?}", atlas);
+    let p1_texture = TextureAtlas::from_file(&display, &Path::new("assets/textures/p1_spritesheet.xml")).unwrap();
+    let ui_texture = TextureAtlas::from_file(&display, &Path::new("assets/textures/hud_spritesheet.xml")).unwrap();
+    println!("atlas: {:?}", p1_texture);
+
 
     let mut sprites = SpriteBatch::new(&display, SPRITES_COUNT).unwrap();
-    support::start_loop(|| {
-        // drawing a frame
-        let mut target = display.draw();
-        target.clear_color(0.0, 0.0, 0.0, 0.0);
+    let mut frame_index = 0;
+    {
+        support::start_loop(|i| {
+            // drawing a frame
+            let mut target = display.draw();
+            target.clear_color(0.0, 0.0, 0.0, 0.0);
+            let (vw, vh) = target.get_dimensions();
 
-        // TODO: Fix lifetime issue with target. Might need to make sprites.begin callback
-        // something that does all the sprite drawing?
-        sprites.begin(|b|
-        {
-            for y in 0..1 {
-                for x in 0..1 {
-                    //let pos: (f32, f32) = (rand::random(), rand::random());
-                    println!("batching sprite at {},{}", x, y);
-                    b.draw(x as f32, y as f32, 32.0, 32.0, atlas.clone());
+            sprites.begin(|b|
+            {
+                match ui_texture.get("coins") {
+                    Some(entry) => {
+                        let sw = entry.width as f32;
+                        let sh = entry.height as f32;
+                        b.draw_entry(50.0, 50.0, sw, sh, ui_texture.clone(), entry);
+                    },
+                    None => {}
+                }
+
+            });
+
+            sprites.begin(|b|
+            {
+                let size = 128;
+                let sizef = size as f32;
+
+                let index = ((i / 8) % 11) + 1;
+                let frame = format!("p1_walk{:02}", index);
+                match p1_texture.get(&frame) {
+                    Some(entry) => {
+                        //match entry.upgrade() {
+                        //    Some(entry) => {
+                                if frame_index != index {
+                                    println!("drawing sprite: {:?}", entry);
+                                    frame_index = index;
+                                }
+                                let sw = entry.width as f32;
+                                let sh = entry.height as f32;
+                                b.draw_entry((vw / 2) as f32, (vh / 2) as f32, sw, sh, p1_texture.clone(), entry);
+                        //    },
+                        //    None => {}
+                        //}
+                    },
+                    None => {}
+                }
+            });
+
+            sprites.end(&mut target);
+            target.finish().unwrap();
+
+            for event in display.poll_events() {
+                match event {
+                    glutin::Event::Closed => return support::Action::Stop,
+                    _ => ()
                 }
             }
+
+            support::Action::Continue
         });
-
-        sprites.end(&mut target);
-        target.finish().unwrap();
-
-        for event in display.poll_events() {
-            match event {
-                glutin::Event::Closed => return support::Action::Stop,
-                _ => ()
-            }
-        }
-
-        support::Action::Continue
-    });
+    }
 }

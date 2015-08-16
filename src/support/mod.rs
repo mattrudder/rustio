@@ -15,16 +15,18 @@ pub enum Action {
     Continue,
 }
 
-pub fn start_loop<F>(mut callback: F) where F: FnMut() -> Action {
+pub fn start_loop<F>(mut callback: F) where F: FnMut(i32) -> Action {
     let mut accumulator = 0;
     let mut previous_clock = clock_ticks::precise_time_ns();
-
+    let mut frame = 0;
 
     loop {
-        match callback() {
+        match callback(frame) {
             Action::Stop => break,
             Action::Continue => ()
         };
+
+        frame += 1;
 
         let now = clock_ticks::precise_time_ns();
         accumulator += now - previous_clock;
